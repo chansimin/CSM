@@ -288,6 +288,16 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
       <h2 id="dateLabel">Today</h2>
       <button class="iconbtn" data-act="nextDay" aria-label="Next day" id="nextDayBtn">›</button>
     </div>
+    <section class="panel" id="syncPanel" hidden>
+      <h3>☁️ Sign in to save online</h3>
+      <p class="hint">Meals are kept online so they’re safe if the phone changes, and a parent can see them too.</p>
+      <form id="syncForm">
+        <input class="input" type="email" id="syncEmail" autocomplete="username" placeholder="Email" aria-label="Email" required>
+        <input class="input" type="password" id="syncPass" autocomplete="current-password" placeholder="Password" aria-label="Password" required style="margin-top:8px">
+        <button class="btn full" type="submit" id="syncBtn" style="margin-top:10px">Sign in</button>
+      </form>
+      <div class="status" id="syncStatus" aria-live="polite"></div>
+    </section>
     <div class="train">
       <p><strong>🛶 Paddled today</strong><br>Adds training fuel: +400 kcal, +60 g carbs</p>
       <label class="switch"><input type="checkbox" id="trainToggle" aria-label="Paddled today"><i></i></label>
@@ -426,6 +436,7 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
       </ul>
       <p class="note" style="margin-top:8px">The range counts once you’ve logged 3 meals, or at the end of the day. Eating too little doesn’t earn points. Kopi needs fuel too.</p>
     </section>
+    <p class="note" id="syncLine" style="text-align:center;margin:0" hidden><span id="syncText"></span> <button class="linkbtn" id="syncOut" type="button">Sign out</button></p>
     <button class="linkbtn" data-act="adminOpen" style="display:block;margin:0 auto">Grown-up settings</button>
   </main>
 
@@ -605,6 +616,7 @@ function save(){
   if(!dbRef) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
+    saveTimer = null;
     const snapshot = JSON.parse(JSON.stringify(state));
     saving = saving.then(()=>dbRef.set(snapshot)).catch(()=>{});
   }, 500);
@@ -1315,6 +1327,72 @@ document.addEventListener("change", e=>{
 renderQuick("");
 setAIAvailability();
 renderAll();
+</script>
+<script type="module">
+/* ---------- Family sync (Firebase) ----------
+   Paste the config from Firebase console → Project settings → Your apps → Web app.
+   Leave as null to keep everything on this phone only. Who may read/write is set by
+   the Firestore security rules, not by this page. */
+const FIREBASE_CONFIG = null;
+const V = "10.12.2";
+
+if(FIREBASE_CONFIG){
+  const [{initializeApp}, A, F] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
+  ]);
+  const app = initializeApp(FIREBASE_CONFIG);
+  const auth = A.getAuth(app), ref = F.doc(F.getFirestore(app), "trackers", "family");
+  const panel = $("#syncPanel"), status = $("#syncStatus"), line = $("#syncLine");
+  const keepLocal = () => { try{ localStorage.setItem(LS, JSON.stringify(state)); }catch(e){} };
+  let unsub = null;
+
+  $("#syncForm").addEventListener("submit", async e=>{
+    e.preventDefault();
+    status.classList.remove("err"); status.textContent = "Signing in…"; $("#syncBtn").disabled = true;
+    try{ await A.signInWithEmailAndPassword(auth, $("#syncEmail").value.trim(), $("#syncPass").value); status.textContent = ""; }
+    catch(err){ status.classList.add("err"); status.textContent = /invalid|wrong|not-found|user/.test(err.code||"") ? "That email or password doesn’t match." : "Couldn’t sign in. Check your connection and try again."; }
+    finally{ $("#syncBtn").disabled = false; $("#syncPass").value = ""; }
+  });
+  $("#syncOut").addEventListener("click", ()=>{ if(confirm("Sign out? Meals logged while signed out stay on this phone only.")) A.signOut(auth); });
+
+  A.onAuthStateChanged(auth, async user=>{
+    if(unsub){ unsub(); unsub = null; }
+    dbRef = null;
+    panel.hidden = !!user; line.hidden = !user;
+    if(!user) return;
+    $("#syncText").textContent = "Connecting…";
+    try{
+      const snap = await F.getDoc(ref);
+      const local = state;
+      if(snap.exists()){
+        state = migrate(snap.data());
+        // Keep any days logged on this phone before signing in that the online copy doesn't have
+        const extra = Object.keys(local.days).filter(k=>!state.days[k] && local.days[k].meals.length);
+        extra.forEach(k=>{ state.days[k] = local.days[k]; });
+        dbRef = {set: d=>F.setDoc(ref, d)};
+        if(extra.length) save();
+      } else {
+        dbRef = {set: d=>F.setDoc(ref, d)};
+        save();
+      }
+      keepLocal();
+      state.seenLevel = Math.max(state.seenLevel||1, levelFor(totalXP()).L);
+      renderAll();
+      unsub = F.onSnapshot(ref, s=>{
+        if(!s.exists() || s.metadata.hasPendingWrites || saveTimer) return;
+        state = migrate(s.data()); keepLocal(); lastMonKey = ""; renderAll();
+      });
+      $("#syncText").textContent = `☁️ Saving online as ${user.email}.`;
+    }catch(err){
+      dbRef = null;
+      $("#syncText").textContent = err.code==="permission-denied"
+        ? `${user.email} isn’t allowed to open this tracker.`
+        : "Can’t reach the online copy right now. Saving on this phone.";
+    }
+  });
+}
 </script>
 </body>
 </html>
