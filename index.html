@@ -1388,9 +1388,9 @@ if(FIREBASE_CONFIG){
           if(e.code==="invalid_json" || e.code==="image_rejected") throw e;
           const msg = String(e.code||"") + " " + String(e.message||"") + " " + JSON.stringify(e.customErrorData||{});
           if(e.name==="AbortError" || opts.signal?.aborted) throw Object.assign(new Error(), {code:"cancelled"});
-          if(/\b404\b|not found|is not supported/i.test(msg) && modelIdx < AI_MODELS.length-1){ modelIdx++; continue; }
+          if(/genai config not found|\b403\b|PERMISSION_DENIED|has not been used|is disabled|api-not-enabled|SERVICE_DISABLED/i.test(msg)) throw Object.assign(new Error(), {code:"ai_not_setup"});
           if(/\b429\b|quota|RESOURCE_EXHAUSTED/i.test(msg)) throw Object.assign(new Error(), {code:"rate_limited"});
-          if(/\b403\b|PERMISSION_DENIED|has not been used|is disabled|api-not-enabled|SERVICE_DISABLED/i.test(msg)) throw Object.assign(new Error(), {code:"ai_not_setup"});
+          if(/\b404\b|not found|is not supported/i.test(msg) && modelIdx < AI_MODELS.length-1){ modelIdx++; continue; }
           if(/SAFETY|blocked/i.test(msg)) throw Object.assign(new Error(), {code:"refused"});
           console.warn("Gemini error", e); throw Object.assign(new Error(), {code:"ai_error"});
         }
