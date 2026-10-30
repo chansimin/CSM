@@ -1333,7 +1333,14 @@ renderAll();
    Paste the config from Firebase console → Project settings → Your apps → Web app.
    Leave as null to keep everything on this phone only. Who may read/write is set by
    the Firestore security rules, not by this page. */
-const FIREBASE_CONFIG = null;
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAjYmcStzMsenyGJIbmRbb5JK979YG_ZZU",
+  authDomain: "paddle-fuel.firebaseapp.com",
+  projectId: "paddle-fuel",
+  storageBucket: "paddle-fuel.firebasestorage.app",
+  messagingSenderId: "817235234564",
+  appId: "1:817235234564:web:825341ed8d66a4c34c8a51"
+};
 const V = "10.12.2";
 
 if(FIREBASE_CONFIG){
@@ -1352,7 +1359,11 @@ if(FIREBASE_CONFIG){
     e.preventDefault();
     status.classList.remove("err"); status.textContent = "Signing in…"; $("#syncBtn").disabled = true;
     try{ await A.signInWithEmailAndPassword(auth, $("#syncEmail").value.trim(), $("#syncPass").value); status.textContent = ""; }
-    catch(err){ status.classList.add("err"); status.textContent = /invalid|wrong|not-found|user/.test(err.code||"") ? "That email or password doesn’t match." : "Couldn’t sign in. Check your connection and try again."; }
+    catch(err){ status.classList.add("err"); const c = err.code||"";
+      status.textContent = /invalid-credential|wrong-password|user-not-found|invalid-email/.test(c) ? "That email or password doesn’t match."
+        : /configuration-not-found|operation-not-allowed|unauthorized-domain/.test(c) ? "Online saving isn’t set up yet. Ask a parent to finish the Firebase setup."
+        : c==="auth/too-many-requests" ? "Too many tries. Wait a few minutes, then try again."
+        : "Couldn’t sign in. Check your connection and try again."; }
     finally{ $("#syncBtn").disabled = false; $("#syncPass").value = ""; }
   });
   $("#syncOut").addEventListener("click", ()=>{ if(confirm("Sign out? Meals logged while signed out stay on this phone only.")) A.signOut(auth); });
