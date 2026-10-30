@@ -142,6 +142,10 @@ textarea.input{min-height:64px;resize:vertical}
 .chips{display:flex;flex-wrap:wrap;gap:8px;max-height:260px;overflow:auto;padding:2px}
 .chip{border:1px solid var(--line);background:var(--surface-2);border-radius:99px;padding:8px 12px;font-size:.88rem;text-align:left}
 .chip small{color:var(--muted)}
+.quick{max-height:360px;overflow:auto;padding:2px}
+.quick .chips{max-height:none;overflow:visible;padding:0}
+.qhead{font-size:.8rem;font-weight:700;color:var(--muted);margin:10px 0 6px}
+.qhead:first-child{margin-top:0}
 
 .review{border:2px solid var(--teal)}
 .ritem{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;border-top:1px solid var(--line);padding:10px 0}
@@ -383,9 +387,9 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
 
     <section class="panel">
       <h3>Quick add</h3>
-      <p class="hint">Common Singapore dishes, typical hawker portions. Works offline.</p>
+      <p class="hint">Your recent and usual foods first, then common Singapore dishes. Works offline.</p>
       <input class="input" id="quickSearch" placeholder="Search: nasi lemak, fish soup, milo…" aria-label="Search dishes" style="margin-bottom:10px">
-      <div class="chips" id="quickList"></div>
+      <div class="quick" id="quickList"></div>
       <details style="margin-top:12px">
         <summary>Add my own item</summary>
         <div class="grid2" style="margin-top:8px">
@@ -1014,7 +1018,7 @@ function renderTargets(){
   $("#targetFields").innerHTML = rows.map(r=>`<div class="tgt"><label for="t_${r.k}">${r.label} (${r.unit})<small>${r.sub}</small></label><input class="input" type="number" inputmode="decimal" id="t_${r.k}" value="${t[r.k]}"></div>`).join("");
 }
 function renderAll(){
-  renderHero(); renderToday(); renderCalendar(); renderProgress(); renderTargets(); renderReview();
+  renderHero(); renderToday(); renderCalendar(); renderProgress(); renderTargets(); renderReview(); renderQuick($("#quickSearch").value);
   $("#addDateNote").textContent = "Adding to " + prettyDate(viewDate).toLowerCase();
 }
 
@@ -1237,11 +1241,47 @@ $("#photoInput").addEventListener("change", e=>{
 });
 
 /* ---------- Quick add ---------- */
+// Everything she has logged, keyed by name: how often, when last, and the portion used last time
+function usage(){
+  const u = new Map();
+  Object.keys(state.days).sort().forEach(k=>{
+    state.days[k].meals.forEach(m=>{
+      const t = m.t || toDate(k).getTime();
+      m.items.forEach(it=>{
+        const key = it.name.toLowerCase(), e = u.get(key) || {count:0, last:0};
+        e.count++;
+        if(t >= e.last){ e.last = t; e.item = {name:it.name, portion:it.portion||"1 serving", qty:Number(it.qty)||1, n:{...it.n}}; }
+        u.set(key, e);
+      });
+    });
+  });
+  return u;
+}
+let quickPool = new Map();
+function chipHTML(d){
+  const x = itemTotals(d);
+  return `<button class="chip" data-act="quick" data-key="${esc(d.name.toLowerCase())}">${esc(d.name)}${d.qty!==1?` ×${d.qty}`:""} <small>${Math.round(x.kcal)} kcal, ${Math.round(x.protein)} g protein, ${Math.round(x.carbs)} g carbs</small></button>`;
+}
 function renderQuick(q){
   q = (q||"").toLowerCase().trim();
-  const list = SG.filter(d=>!q || d.name.toLowerCase().includes(q));
-  $("#quickList").innerHTML = list.length ? list.map(d=>`<button class="chip" data-act="quick" data-name="${esc(d.name)}">${esc(d.name)} <small>${d.n.kcal} kcal, ${d.n.protein} g protein, ${d.n.carbs} g carbs</small></button>`).join("")
+  const u = usage(), uses = d => u.get(d.name.toLowerCase())?.count || 0;
+  quickPool = new Map();
+  SG.forEach(d=>quickPool.set(d.name.toLowerCase(), {name:d.name, portion:d.portion, qty:1, n:{...d.n}}));
+  u.forEach((e,key)=>quickPool.set(key, e.item));
+  const all = [...quickPool.values()].filter(d=>!q || d.name.toLowerCase().includes(q)).sort((a,b)=>uses(b)-uses(a));
+  let html = "";
+  if(!q && u.size){
+    const recent = [...u.values()].sort((a,b)=>b.last-a.last).slice(0,6).map(e=>e.item);
+    const seen = new Set(recent.map(d=>d.name.toLowerCase()));
+    const often = [...u.values()].filter(e=>e.count>=2 && !seen.has(e.item.name.toLowerCase()))
+      .sort((a,b)=>b.count-a.count || b.last-a.last).slice(0,6).map(e=>e.item);
+    html += `<p class="qhead">🕘 Recent</p><div class="chips">${recent.map(chipHTML).join("")}</div>`;
+    if(often.length) html += `<p class="qhead">⭐ Often</p><div class="chips">${often.map(chipHTML).join("")}</div>`;
+    html += `<p class="qhead">All dishes</p>`;
+  }
+  html += all.length ? `<div class="chips">${all.map(chipHTML).join("")}</div>`
     : `<p class="note">Not in the list. Describe it above, or add your own item below.</p>`;
+  $("#quickList").innerHTML = html;
 }
 $("#quickSearch").addEventListener("input", e=>renderQuick(e.target.value));
 
@@ -1272,8 +1312,8 @@ document.addEventListener("click", e=>{
   else if(act==="analyseText"){ analyse("text"); }
   else if(act==="stop"){ ctl && ctl.abort(); }
   else if(act==="quick"){
-    const d = SG.find(x=>x.name===el.dataset.name);
-    if(d){ addPending([{name:d.name, portion:d.portion, qty:1, n:{...d.n}, conf:"high"}], "quick"); animateMon("jump"); }
+    const d = quickPool.get(el.dataset.key);
+    if(d){ addPending([{name:d.name, portion:d.portion, qty:d.qty, n:{...d.n}, conf:"high"}], "quick"); animateMon("jump"); }
   }
   else if(act==="addCustom"){
     const name = $("#cName").value.trim();
