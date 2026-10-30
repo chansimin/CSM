@@ -1344,25 +1344,24 @@ const FIREBASE_CONFIG = {
   appId: "1:817235234564:web:825341ed8d66a4c34c8a51"
 };
 const V = "12.19.0";
-// Gemini via Firebase AI Logic (Gemini Developer API, free Spark-plan quota). Tried in order.
-const AI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+// Gemini Developer API (free tier). The key is NOT in this file: it lives in Firestore at
+// config/gemini { key: "..." }, readable only by signed-in family accounts. Models tried in order.
+const AI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
 
 if(FIREBASE_CONFIG){
-  const [{initializeApp}, A, F, G] = await Promise.all([
+  const [{initializeApp}, A, F] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
-    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
-    import(`https://www.gstatic.com/firebasejs/${V}/firebase-ai.js`)
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
   ]);
   const app = initializeApp(FIREBASE_CONFIG);
-  const auth = A.getAuth(app), ref = F.doc(F.getFirestore(app), "trackers", "family");
+  const auth = A.getAuth(app), db = F.getFirestore(app), ref = F.doc(db, "trackers", "family");
   const panel = $("#syncPanel"), status = $("#syncStatus"), line = $("#syncLine");
   const keepLocal = () => { try{ localStorage.setItem(LS, JSON.stringify(state)); }catch(e){} };
   let unsub = null;
 
   // Photo and text estimates: same interface the page uses on claude.ai (sample.json / sample.limits)
-  const ai = G.getAI(app, {backend: new G.GoogleAIBackend()});
-  let modelIdx = 0;
+  let geminiKey = null;
   const shrink = file => new Promise((res, rej)=>{
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = ()=>{
@@ -1377,24 +1376,37 @@ if(FIREBASE_CONFIG){
   const gemini = {
     limits: async ()=>({images:true}),
     async json(prompt, opts={}){
+      const fail = code => Object.assign(new Error(), {code});
+      if(!geminiKey){
+        try{ geminiKey = (await F.getDoc(F.doc(db, "config", "gemini"))).data()?.key || null; }catch(e){}
+        if(!geminiKey) throw fail("ai_not_setup");
+      }
       const parts = [{text: prompt}];
       for(const f of opts.images||[]) parts.push({inlineData:{mimeType:"image/jpeg", data: await shrink(f)}});
-      for(;;){
-        const model = G.getGenerativeModel(ai, {model: AI_MODELS[modelIdx], generationConfig:{responseMimeType:"application/json", temperature:0.2}});
+      const body = JSON.stringify({contents:[{parts}], generationConfig:{responseMimeType:"application/json", temperature:0.2}});
+      let last = "ai_error";
+      for(const model of AI_MODELS){
+        let res, data;
         try{
-          const r = await model.generateContent(parts, {signal: opts.signal, timeout: 90000});
-          try{ return JSON.parse(r.response.text()); }catch(e){ throw Object.assign(new Error(), {code:"invalid_json"}); }
+          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+            {method:"POST", headers:{"Content-Type":"application/json", "x-goog-api-key": geminiKey}, body, signal: opts.signal});
+          data = await res.json().catch(()=>({}));
         }catch(e){
-          if(e.code==="invalid_json" || e.code==="image_rejected") throw e;
-          const msg = String(e.code||"") + " " + String(e.message||"") + " " + JSON.stringify(e.customErrorData||{});
-          if(e.name==="AbortError" || opts.signal?.aborted) throw Object.assign(new Error(), {code:"cancelled"});
-          if(/genai config not found|\b403\b|PERMISSION_DENIED|has not been used|is disabled|api-not-enabled|SERVICE_DISABLED/i.test(msg)) throw Object.assign(new Error(), {code:"ai_not_setup"});
-          if(/\b429\b|quota|RESOURCE_EXHAUSTED/i.test(msg)) throw Object.assign(new Error(), {code:"rate_limited"});
-          if(/\b404\b|not found|is not supported/i.test(msg) && modelIdx < AI_MODELS.length-1){ modelIdx++; continue; }
-          if(/SAFETY|blocked/i.test(msg)) throw Object.assign(new Error(), {code:"refused"});
-          console.warn("Gemini error", e); throw Object.assign(new Error(), {code:"ai_error"});
+          if(e.name==="AbortError" || opts.signal?.aborted) throw fail("cancelled");
+          last = "ai_error"; continue;
         }
+        if(res.ok){
+          const c = data.candidates?.[0];
+          if(!c || /SAFETY|PROHIBITED|BLOCKLIST/.test(c.finishReason||"") || data.promptFeedback?.blockReason) throw fail("refused");
+          const text = (c.content?.parts||[]).filter(x=>!x.thought && x.text).map(x=>x.text).join("");
+          try{ return JSON.parse(text); }catch(e){ throw fail("invalid_json"); }
+        }
+        const msg = (data.error?.status||"") + " " + (data.error?.message||"");
+        if((res.status===400 && /API_KEY|api key/i.test(msg)) || res.status===403){ geminiKey = null; throw fail("ai_not_setup"); }
+        // Retired, overloaded or out of quota: try the next model
+        last = res.status===429 ? "rate_limited" : "ai_error";
       }
+      throw fail(last);
     }
   };
   const setAI = on => { if(window.claude && window.claude.use) return; sample = on ? gemini : null; canImages = on; setAIAvailability(); };
@@ -1416,7 +1428,7 @@ if(FIREBASE_CONFIG){
     if(unsub){ unsub(); unsub = null; }
     dbRef = null;
     panel.hidden = !!user; line.hidden = !user;
-    setAI(!!user);
+    setAI(!!user); if(!user) geminiKey = null;
     if(!user) return;
     $("#syncText").textContent = "Connecting…";
     try{
