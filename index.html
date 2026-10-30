@@ -442,7 +442,7 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
     <div id="adminBody" hidden>
     <section class="panel">
       <h3>About her</h3>
-      <p class="hint">Enter her details, then tap Recalculate. They stay on this device only.</p>
+      <p class="hint">Update these if anything changes, then tap Recalculate.</p>
       <div class="grid2">
         <label class="field"><span>Age</span><input class="input" type="number" id="pAge" inputmode="numeric"></label>
         <label class="field"><span>Weight (kg)</span><input class="input" type="number" id="pKg" inputmode="decimal"></label>
@@ -580,7 +580,7 @@ function calcTargets(p){
     fibre: 28, sodium: 2000, mealCarbs: 30
   };
 }
-const DEFAULT_PROFILE = {age:16, kg:60, cm:165, activity:1.55};
+const DEFAULT_PROFILE = {age:15, kg:99, cm:167, activity:1.55};
 function freshState(){ return {v:2, profile:{...DEFAULT_PROFILE}, targets:calcTargets(DEFAULT_PROFILE), train:{kcal:300, carbs:40}, days:{}, seenLevel:1}; }
 function migrate(s){
   const f = freshState();
@@ -1294,7 +1294,7 @@ document.addEventListener("click", e=>{
   else if(act==="pinSubmit"){ pinSubmit(); }
   else if(act==="pinReset"){ pinMode = "set"; adminUnlocked = false; showGate(); }
   else if(act==="recalc"){
-    const p = {age:Number($("#pAge").value)||16, kg:Number($("#pKg").value)||60, cm:Number($("#pCm").value)||165, activity:Number($("#pAct").value)||1.55};
+    const p = {age:Number($("#pAge").value)||15, kg:Number($("#pKg").value)||99, cm:Number($("#pCm").value)||167, activity:Number($("#pAct").value)||1.55};
     state.profile = p; state.targets = {...calcTargets(p), mealCarbs: state.targets.mealCarbs}; save(); renderAll(); toast("Targets recalculated");
   }
   else if(act==="saveTargets"){
