@@ -289,7 +289,7 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
       <button class="iconbtn" data-act="nextDay" aria-label="Next day" id="nextDayBtn">›</button>
     </div>
     <div class="train">
-      <p><strong>🛶 Paddled today</strong><br>Adds training fuel to today’s plan</p>
+      <p><strong>🛶 Paddled today</strong><br>Adds training fuel: +400 kcal, +60 g carbs</p>
       <label class="switch"><input type="checkbox" id="trainToggle" aria-label="Paddled today"><i></i></label>
     </div>
     <div class="train walk">
@@ -417,12 +417,12 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
         <li>Log a meal: +10 (up to 4 a day)</li>
         <li>Hit your protein goal: +30</li>
         <li>Hit your fibre goal: +15</li>
-        <li>Lunch or dinner within the carb limit: +10 each</li>
         <li>Paddle or train: +20</li>
         <li>15-min walk or cycle: +15</li>
         <li>Stay inside your calorie range: +15</li>
         <li>Saturated fat under limit: +10</li>
         <li>Sugar under limit: +10</li>
+        <li>Carbs under the daily limit: +10</li>
       </ul>
       <p class="note" style="margin-top:8px">The range counts once you’ve logged 3 meals, or at the end of the day. Eating too little doesn’t earn points. Kopi needs fuel too.</p>
     </section>
@@ -449,9 +449,9 @@ details summary{cursor:pointer;font-weight:700;padding:4px 0}
         <label class="field"><span>Height (cm)</span><input class="input" type="number" id="pCm" inputmode="decimal"></label>
         <label class="field"><span>Activity</span>
           <select class="input" id="pAct">
-            <option value="1.375">Light (1–2 sessions/week)</option>
-            <option value="1.55">Training 3–4×/week</option>
-            <option value="1.725">Training most days</option>
+            <option value="1">Mostly sitting (school, study, screens)</option>
+            <option value="1.18">Some walking most days</option>
+            <option value="1.35">Very active, even without paddling</option>
           </select>
         </label>
       </div>
@@ -499,7 +499,6 @@ const NUT = [
   {k:"sodium",  label:"Sodium",        unit:"mg",   kind:"limit"}
 ];
 const KEYS = NUT.map(n=>n.k);
-const MAIN = ["Lunch","Dinner"];
 
 // name, portion, kcal, protein, carbs, sugar, fat, satFat, fibre, sodium  (approximate typical Singapore servings)
 const SG = [
@@ -551,7 +550,7 @@ const BADGES = [
   {id:"first",  ico:"🥢", name:"First bite",      desc:"Log your first meal"},
   {id:"photo",  ico:"📸", name:"Snap happy",      desc:"Log 5 meals by photo"},
   {id:"protein",ico:"💪", name:"Protein paddler", desc:"Hit protein on 3 days"},
-  {id:"carb",   ico:"🍚", name:"Carb smart",      desc:"10 lunches or dinners within the carb limit"},
+  {id:"carb",   ico:"🍚", name:"Carb smart",      desc:"Carbs under limit on 5 days"},
   {id:"fibre",  ico:"🥬", name:"Fibre friend",    desc:"Hit fibre on 3 days"},
   {id:"kosong", ico:"☕", name:"Kosong club",      desc:"Sugar under limit on 5 days"},
   {id:"streak", ico:"🔥", name:"Week streak",     desc:"Log 2+ meals for 7 days in a row"},
@@ -565,27 +564,37 @@ const BADGES = [
 /* ---------- State ---------- */
 const LS = "paddle-fuel-v1";
 const round50 = x => Math.round(x/50)*50;
+// IOM/DRI (2005) energy equation for overweight girls aged 3–18. Activity is daily life
+// on non-paddling days; paddle days add state.train on top, so training isn't counted twice.
+const ACTIVITY = [1.00, 1.18, 1.35];
 function calcTargets(p){
-  const bmr = 10*p.kg + 6.25*p.cm - 5*p.age - 161;
-  const maint = bmr * p.activity;
-  const kcal = round50(maint - Math.min(550, maint*0.2));
+  const tee = 389 - 41.2*p.age + p.activity*(15.0*p.kg + 701.6*p.cm/100);
+  const kcal = round50(tee - Math.min(500, tee*0.2));
+  const protein = Math.min(150, Math.round(p.kg*1.2/5)*5);
+  const carbs = Math.round(kcal*0.40/4/5)*5;
   return {
-    maint: round50(maint), kcal,
-    floor: round50(Math.max(1800, maint*0.65)),
-    protein: Math.min(150, Math.round(p.kg*1.2/5)*5),
-    carbs: Math.round(kcal*0.45/4/5)*5,
-    fat: Math.round(kcal*0.30/9),
+    maint: round50(tee), kcal,
+    floor: round50(Math.max(1600, tee*0.7)),
+    protein, carbs,
+    fat: Math.round((kcal - protein*4 - carbs*4)/9),
     satFat: Math.round(kcal*0.10/9),
-    sugar: Math.round(kcal*0.08/4),
-    fibre: 28, sodium: 2000, mealCarbs: 30
+    sugar: Math.round(kcal*0.10/4),
+    fibre: Math.round(kcal/1000*14), sodium: 2000
   };
 }
-const DEFAULT_PROFILE = {age:15, kg:99, cm:167, activity:1.55};
-function freshState(){ return {v:2, profile:{...DEFAULT_PROFILE}, targets:calcTargets(DEFAULT_PROFILE), train:{kcal:300, carbs:40}, days:{}, seenLevel:1}; }
+const DEFAULT_PROFILE = {age:15, kg:99, cm:167, activity:1.00};
+function freshState(){ return {v:3, profile:{...DEFAULT_PROFILE}, targets:calcTargets(DEFAULT_PROFILE), train:{kcal:400, carbs:60, fat:10}, days:{}, seenLevel:1}; }
 function migrate(s){
   const f = freshState();
   if(!s || typeof s!=="object") return f;
-  return {...f, ...s, profile:{...f.profile, ...(s.profile||{})}, targets:{...f.targets, ...(s.targets||{})}, train:{...f.train, ...(s.train||{})}, days:s.days||{}};
+  const out = {...f, ...s, profile:{...f.profile, ...(s.profile||{})}, targets:{...f.targets, ...(s.targets||{})}, train:{...f.train, ...(s.train||{})}, days:s.days||{}};
+  if((s.v||0) < 3){
+    // v2 used an adult formula with training double-counted: recalculate from the saved profile
+    if(!ACTIVITY.includes(out.profile.activity)) out.profile.activity = DEFAULT_PROFILE.activity;
+    out.targets = calcTargets(out.profile); out.train = {...f.train}; out.v = 3;
+  }
+  delete out.targets.mealCarbs;
+  return out;
 }
 let state = freshState();
 try{ const raw = localStorage.getItem(LS); if(raw) state = migrate(JSON.parse(raw)); }catch(e){}
@@ -638,16 +647,8 @@ function sumItems(items){ const o={}; KEYS.forEach(k=>o[k]=0); items.forEach(it=
 function dayTotals(k){ return sumItems(getDay(k).meals.flatMap(m=>m.items)); }
 function dayTargets(k){
   const t = {...state.targets};
-  if(getDay(k).trained){ t.kcal += state.train.kcal; t.floor += state.train.kcal; t.carbs += state.train.carbs; }
+  if(getDay(k).trained){ t.kcal += state.train.kcal; t.floor += state.train.kcal; t.carbs += state.train.carbs; t.fat += state.train.fat||0; }
   return t;
-}
-function mainCarbs(k){
-  const out = {};
-  MAIN.forEach(type=>{
-    const ms = getDay(k).meals.filter(m=>m.type===type);
-    out[type] = {logged: ms.length>0, carbs: sumItems(ms.flatMap(m=>m.items)).carbs};
-  });
-  return out;
 }
 function dayXP(k){
   const d = state.days[k]; const f = {};
@@ -659,11 +660,10 @@ function dayXP(k){
   if(n && T.fibre >= t.fibre){ xp+=15; f.fibre=1; }
   if(d.trained){ xp+=20; f.trained=1; }
   if(d.walked){ xp+=15; f.walked=1; }
-  const mc = mainCarbs(k); f.carbSmart = 0;
-  MAIN.forEach(type=>{ if(mc[type].logged && mc[type].carbs <= t.mealCarbs){ xp+=10; f.carbSmart++; } });
   if(n && complete){
     if(T.satFat <= t.satFat){ xp+=10; f.sat=1; }
     if(T.sugar <= t.sugar){ xp+=10; f.sugar=1; }
+    if(T.carbs <= t.carbs){ xp+=10; f.carb=1; }
     if(T.kcal >= t.floor && T.kcal <= t.kcal){ xp+=15; f.band=1; }
   }
   return {xp, f};
@@ -686,14 +686,14 @@ function counts(){
     c.photo += d.meals.filter(m=>m.src==="photo").length;
     d.meals.forEach(m=>m.items.forEach(it=>dishes.add(it.name.toLowerCase())));
     if(f.protein) c.protein++; if(f.fibre) c.fibre++; if(f.sugar) c.sugar++; if(f.trained) c.trained++; if(f.band) c.band++; if(f.walked) c.walked++;
-    c.carb += f.carbSmart||0;
+    if(f.carb) c.carb++;
   });
   c.dishes = dishes.size;
   return c;
 }
 function earned(){
   const c = counts(), L = levelFor(totalXP()).L;
-  return {first:c.meals>=1, photo:c.photo>=5, protein:c.protein>=3, carb:c.carb>=10, fibre:c.fibre>=3, kosong:c.sugar>=5, streak:streak()>=7, paddle:c.trained>=5, steady:c.band>=5, walk:c.walked>=10, month:c.days>=20, lvl5:L>=5};
+  return {first:c.meals>=1, photo:c.photo>=5, protein:c.protein>=3, carb:c.carb>=5, fibre:c.fibre>=3, kosong:c.sugar>=5, streak:streak()>=7, paddle:c.trained>=5, steady:c.band>=5, walk:c.walked>=10, month:c.days>=20, lvl5:L>=5};
 }
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),2400); }
 
@@ -858,14 +858,12 @@ function mascotMessage(k){
   const d = getDay(k), T = dayTotals(k), t = dayTargets(k), n = d.meals.length;
   const isToday = k === todayKey();
   const hour = new Date().getHours();
-  const mc = mainCarbs(k);
-  const overMain = MAIN.find(m=>mc[m].logged && mc[m].carbs > t.mealCarbs);
   if(!isToday && !n) return {mood:"sleepy", msg:"Nothing logged that day. You can still add meals for it."};
   if(!n) return {mood:"sleepy", msg: hour<11 ? "Morning! Snap your breakfast and wake me up." : "Feed me data! Snap your next meal."};
   if(T.kcal > t.kcal) return {mood:"neutral", msg:"We went a bit over today. No biggie, tomorrow’s a fresh paddle."};
   if((!isToday || hour>=19) && T.kcal < t.floor) return {mood:"neutral", msg:"That’s a light day. Paddlers need fuel, maybe a protein snack like yoghurt or eggs?"};
   if(isToday && !d.trained && !d.walked && hour>=16) return {mood:"neutral", msg:"No paddling today? A 15-min walk or cycle counts. Kopi’s coming with you!"};
-  if(overMain) return {mood:"neutral", msg:`${overMain} carbs went past ${t.mealCarbs} g. Next time try a small scoop of rice with extra fish, tofu or veg.`};
+  if(T.carbs > t.carbs) return {mood:"neutral", msg:"Carbs are past today’s limit. Next meal, try a small scoop of rice with extra fish, tofu, egg or veg."};
   if(T.protein >= t.protein) return {mood:"happy", msg:"Protein goal smashed! Kopi is flexing. 💪"};
   if(T.sugar > t.sugar) return {mood:"neutral", msg:"Sugar’s past the limit. Try kopi-O kosong or teh siew dai next round."};
   const left = Math.max(0, t.protein - T.protein);
@@ -907,26 +905,20 @@ function barHTML(nut, val, tgt, floor, note){
     <div class="track" role="img" aria-label="${nut.label}: ${fmt(val,nut.unit)} of ${fmt(tgt,nut.unit)} ${nut.unit}">${segs}${marks}</div></div>`;
 }
 function dashboardHTML(k){
-  const T = dayTotals(k), t = dayTargets(k), mc = mainCarbs(k);
+  const T = dayTotals(k), t = dayTargets(k);
   const left = t.kcal - T.kcal;
   let html = `<div class="big-cal"><b>${Math.round(T.kcal).toLocaleString()}</b><span class="note">kcal eaten, ${left>=0 ? Math.round(left).toLocaleString()+" left in range" : "over target"}</span></div>
     <p class="note" style="margin:0">Range ${t.floor.toLocaleString()}–${t.kcal.toLocaleString()} kcal. The dashed line is the minimum fuel you need.</p>`;
   NUT.forEach(n=>{ html += barHTML(n, T[n.k], t[n.k], n.k==="kcal" ? t.floor : 0); });
-  html += `<div class="subhead"><strong>Lunch &amp; dinner carbs</strong><span class="note">${t.mealCarbs} g limit each</span></div>`;
-  MAIN.forEach(type=>{
-    html += barHTML({label:type, unit:"g", kind:"limit"}, mc[type].carbs, t.mealCarbs, 0, mc[type].logged ? null : "Not logged yet");
-  });
   return html;
 }
 function mealsHTML(k){
-  const d = getDay(k), t = dayTargets(k);
+  const d = getDay(k);
   if(!d.meals.length) return "";
   return d.meals.map(m=>{
     const s = sumItems(m.items);
-    const isMain = MAIN.includes(m.type);
-    const cflag = isMain ? (s.carbs > t.mealCarbs ? `<span class="mflag">Carbs ${Math.round(s.carbs)} g</span>` : `<span class="mflag good">Carbs ${Math.round(s.carbs)} g ✓</span>`) : "";
-    return `<div class="meal"><div class="meal-head"><span class="meal-type">${esc(m.type)} ${m.src==="photo"?"📸":""}${cflag}</span>
-      <span class="meal-sum">${Math.round(s.kcal)} kcal, ${Math.round(s.protein)} g protein</span></div>
+    return `<div class="meal"><div class="meal-head"><span class="meal-type">${esc(m.type)} ${m.src==="photo"?"📸":""}</span>
+      <span class="meal-sum">${Math.round(s.kcal)} kcal, ${Math.round(s.protein)} g protein, ${Math.round(s.carbs)} g carbs</span></div>
       <ul>${m.items.map(it=>{const x=itemTotals(it);return `<li><span>${esc(it.name)}${it.qty!==1?` ×${it.qty}`:""}</span><span>${Math.round(x.kcal)} kcal</span></li>`;}).join("")}</ul>
       <button class="linkbtn" data-act="delMeal" data-day="${k}" data-id="${m.id}">Remove</button></div>`;
   }).join("");
@@ -1004,9 +996,8 @@ function renderProgress(){
 function renderTargets(){
   const p = state.profile, t = state.targets;
   $("#pAge").value = p.age; $("#pKg").value = p.kg; $("#pCm").value = p.cm; $("#pAct").value = String(p.activity);
-  $("#calcExplain").textContent = `Estimated energy needs are about ${t.maint.toLocaleString()} kcal a day (Mifflin–St Jeor × activity). The calorie target is a gentle deficit of about 20%, never below a ${t.floor.toLocaleString()} kcal fuel floor. Protein is ~1.2 g per kg. Lunch and dinner carbs are capped at ${t.mealCarbs} g each. Saturated fat stays ≤10% and sugar ≤8% of calories. Training days add ${state.train.kcal} kcal and ${state.train.carbs} g carbs.`;
+  $("#calcExplain").textContent = `On a non-paddling day she needs about ${t.maint.toLocaleString()} kcal (IOM/DRI equation for teen girls above a healthy weight). The target is about 20% less (max 500 kcal) for slow, steady progress, never below a ${t.floor.toLocaleString()} kcal fuel floor. Protein is ~1.2 g per kg; carbs are ~40% of calories, below the usual 45–65% to help with insulin, but well above the 130 g minimum the brain needs; fat makes up the rest (~35%). Saturated fat ≤10% and total sugar ≤10% of calories (fruit and milk included). Fibre is 14 g per 1,000 kcal. Paddle days add ${state.train.kcal} kcal, ${state.train.carbs} g carbs and ${state.train.fat} g fat. Check her weight trend after 4 weeks: if it hasn’t moved, nudge activity down a level; if it’s dropping faster than 0.5 kg a week, nudge it up.`;
   const rows = [...NUT.map(n=>({k:n.k,label:n.label,unit:n.unit,sub:n.kind==="goal"?"Aim for at least":"Stay under (whole day)"})),
-    {k:"mealCarbs",label:"Lunch & dinner carbs",unit:"g",sub:"Per meal"},
     {k:"floor",label:"Minimum fuel",unit:"kcal",sub:"Don’t go below on any day"}];
   $("#targetFields").innerHTML = rows.map(r=>`<div class="tgt"><label for="t_${r.k}">${r.label} (${r.unit})<small>${r.sub}</small></label><input class="input" type="number" inputmode="decimal" id="t_${r.k}" value="${t[r.k]}"></div>`).join("");
 }
@@ -1073,10 +1064,10 @@ function renderReview(){
       <select aria-label="Portion for ${esc(it.name)}" data-qty="${i}">${opts.map(o=>`<option value="${o}" ${o===it.qty?"selected":""}>×${o}</option>`).join("")}</select>
       <button class="x" data-act="rmItem" data-i="${i}" aria-label="Remove ${esc(it.name)}">✕</button></div>`;
   }).join("");
-  const s = sumItems(pending.items), type = $("#mealType").value, lim = state.targets.mealCarbs;
+  const s = sumItems(pending.items), lim = dayTargets(viewDate).carbs, dayCarbs = dayTotals(viewDate).carbs + s.carbs;
   let warn = "";
-  if(MAIN.includes(type) && s.carbs > lim){
-    warn = `<div class="warnbox">🍚 ${Math.round(s.carbs)} g carbs, over the ${lim} g ${type.toLowerCase()} limit. Try ×0.25 or ×0.5 on the rice or noodles, and add tofu, egg, fish or veg instead.</div>`;
+  if(dayCarbs > lim){
+    warn = `<div class="warnbox">🍚 This takes the day to ${Math.round(dayCarbs)} g carbs, over the ${lim} g limit. Try ×0.5 on the rice or noodles, and add tofu, egg, fish or veg instead.</div>`;
   }
   $("#reviewTotal").innerHTML = warn + `Meal total: ${Math.round(s.kcal)} kcal, ${Math.round(s.protein)} g protein, ${Math.round(s.carbs)} g carbs, ${Math.round(s.sugar)} g sugar, ${fmt(s.satFat,"g")} g saturated fat, ${Math.round(s.sodium)} mg sodium`;
   const tip = $("#reviewTip");
@@ -1096,10 +1087,9 @@ function saveMeal(){
   const t = dayTargets(viewDate), T = dayTotals(viewDate);
   if(levelFor(totalXP()).L > beforeL) return;
   setTimeout(()=>{
-    if(MAIN.includes(type) && s.carbs > t.mealCarbs) emote({mood:"worried", anim:"shake", fx:"💦", msg:`Oof, ${Math.round(s.carbs)} g carbs at ${type.toLowerCase()}. Smaller rice scoop next time?`, ms:3500});
+    if(T.carbs > t.carbs && T.carbs - s.carbs <= t.carbs) emote({mood:"worried", anim:"shake", fx:"💦", msg:`Oof, that’s ${Math.round(T.carbs)} g carbs today, past the ${t.carbs} g limit. Smaller rice scoop next time?`, ms:3500});
     else if(!proteinBefore && T.protein >= t.protein) emote({mood:"happy", anim:"flex", fx:"💪", msg:"PROTEIN GOAL! Look at me flex!", ms:3500});
     else if(T.kcal > t.kcal) emote({mood:"wow", anim:"wiggle", fx:"😮", msg:"We’re over for today. All good, lighter dinner tomorrow.", ms:3500});
-    else if(MAIN.includes(type)) emote({mood:"yum", anim:"jump", fx:["😋","✨"], msg:`Carb-smart ${type.toLowerCase()}! +10 bonus XP`, ms:3000});
     else emote({mood:"yum", anim:"jump", fx:["😋","✨"], msg:"Nom nom! Logged.", ms:2600});
   }, 150);
 }
@@ -1131,7 +1121,7 @@ function setAIAvailability(){
 })();
 
 function buildPrompt(task){
-  const lim = state.targets.mealCarbs;
+  const lim = state.targets.carbs;
   return `You estimate nutrition for meals eaten in Singapore. You know Singapore hawker, kopitiam, food court, Malay, Chinese, Indian, Peranakan, Western and home-cooked food, typical Singapore portion sizes, and Health Promotion Board (HPB) energy and nutrient composition values. Local drink orders matter: kopi/teh = condensed milk and sugar; "-O" = no milk, with sugar; "-C" = evaporated milk and sugar; "kosong" = no sugar; "siew dai" = less sugar; "ga dai" = more sugar; "peng" = iced.
 
 TASK: ${task}
@@ -1141,7 +1131,7 @@ List each separate food or drink as its own item, and list rice, noodles, bread 
 Reply with only JSON in exactly this shape:
 {"items":[{"name":"White rice (chicken rice style)","portion":"1 plate serving","kcal":330,"protein":6,"carbs":58,"sugar":0,"fat":10,"satFat":3,"fibre":1,"sodium":350,"confidence":"high"}],"tip":"one short sentence"}
 
-Numbers are totals for that portion: kcal; grams for protein, carbs, sugar, fat, satFat, fibre; milligrams for sodium. confidence is "high", "medium" or "low". "tip" is one short, kind, practical suggestion. The target is about ${lim} g of carbohydrate at lunch and dinner, with more protein, so if the meal is heavy on rice, noodles or bread, suggest a realistic hawker way to cut the starch (small scoop of rice, ask for less noodles, add tofu, egg, fish or veg); otherwise suggest adding protein or fibre, or cutting sugar or saturated fat. The reader is a teenage canoeist; never mention body weight, dieting, or eating less overall. If there is no food or drink, return {"items":[],"tip":""}.`;
+Numbers are totals for that portion: kcal; grams for protein, carbs, sugar, fat, satFat, fibre; milligrams for sodium. confidence is "high", "medium" or "low". "tip" is one short, kind, practical suggestion. Her daily carbohydrate limit is about ${lim} g and she needs more protein, so if the meal is heavy on rice, noodles or bread, suggest a realistic hawker way to cut the starch (small scoop of rice, ask for less noodles, add tofu, egg, fish or veg); otherwise suggest adding protein or fibre, or cutting sugar or saturated fat. The reader is a teenage canoeist; never mention body weight, dieting, or eating less overall. If there is no food or drink, return {"items":[],"tip":""}.`;
 }
 function cleanItems(res){
   const arr = Array.isArray(res?.items) ? res.items : [];
@@ -1294,12 +1284,12 @@ document.addEventListener("click", e=>{
   else if(act==="pinSubmit"){ pinSubmit(); }
   else if(act==="pinReset"){ pinMode = "set"; adminUnlocked = false; showGate(); }
   else if(act==="recalc"){
-    const p = {age:Number($("#pAge").value)||15, kg:Number($("#pKg").value)||99, cm:Number($("#pCm").value)||167, activity:Number($("#pAct").value)||1.55};
-    state.profile = p; state.targets = {...calcTargets(p), mealCarbs: state.targets.mealCarbs}; save(); renderAll(); toast("Targets recalculated");
+    const p = {age:Number($("#pAge").value)||15, kg:Number($("#pKg").value)||99, cm:Number($("#pCm").value)||167, activity:Number($("#pAct").value)||1};
+    state.profile = p; state.targets = calcTargets(p); save(); renderAll(); toast("Targets recalculated");
   }
   else if(act==="saveTargets"){
     const t = {...state.targets};
-    [...KEYS,"floor","mealCarbs"].forEach(k=>{ const v = Number($("#t_"+k).value); if(isFinite(v) && v>0) t[k]=v; });
+    [...KEYS,"floor"].forEach(k=>{ const v = Number($("#t_"+k).value); if(isFinite(v) && v>0) t[k]=v; });
     if(t.floor > t.kcal) t.floor = t.kcal;
     state.targets = t; save(); renderAll(); toast("Targets saved");
   }
